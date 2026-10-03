@@ -3,6 +3,7 @@
 from flask import Flask, jsonify, request, send_from_directory
 
 from audit import audit_signals
+from isolation import IsolationConflict, IsolationError, plan_isolation
 from layout import solve_layout
 from rewire import RewireError, SeamlessConflict, seamless_rewire
 from solver import (EXAMPLES, ConfigError, FaultTargetError,
@@ -44,6 +45,30 @@ def plan():
                                                "message": "请求体必须是 JSON 配置对象"}}), 400
     try:
         result = solve(config)
+    except ConfigError as exc:
+        return _structured_error(exc, 400)
+    return jsonify(result)
+
+
+@app.post("/api/crosstalk-isolation")
+def crosstalk_isolation():
+    """串音隔离规划：按隔离组与禁配组对重新规划全部路由（回溯搜索）。"""
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": {"code": "BAD_REQUEST",
+                                               "message": "请求体必须是 JSON 对象"}}), 400
+    config = body.get("config")
+    if not isinstance(config, dict):
+        return jsonify({"ok": False, "error": {"code": "BAD_REQUEST",
+                                               "message": "缺少 config 配置对象"}}), 400
+    isolation = body.get("isolation", {})
+    try:
+        result = plan_isolation(config, isolation)
+    except IsolationConflict as exc:
+        # 穷尽回溯仍无满足隔离的完整规划：冲突组对 / 最短证据 / 未满足路由
+        return _structured_error(exc, 409)
+    except IsolationError as exc:
+        return _structured_error(exc, 400)
     except ConfigError as exc:
         return _structured_error(exc, 400)
     return jsonify(result)

@@ -904,4 +904,30 @@ EXAMPLES = {
             },
         },
     },
+    "isolation": {
+        "label": "串音隔离演示（贪心失败→回溯重排）",
+        "config": {
+            "devices": [
+                {"name": "VOX", "inputs": [], "outputs": ["out"]},
+                {"name": "TB", "inputs": [], "outputs": ["out"]},
+                {"name": "PRE", "inputs": ["in"], "outputs": ["out"]},
+                {"name": "DST", "inputs": ["in"], "outputs": []},
+            ],
+            "pairs": [
+                {"id": 1, "top": "VOX.out", "bottom": "PRE.in", "mode": "half"},
+                {"id": 2, "top": "PRE.out", "bottom": "DST.in", "mode": "half"},
+                {"id": 3, "top": "TB.out", "bottom": None, "mode": "through"},
+            ],
+            "routes": [
+                {"source": "VOX.out", "target": "DST.in"},
+                {"source": "TB.out", "target": "PRE.in"},
+            ],
+            # 随示例一起载入的串音隔离声明（parse_config 忽略未知键，
+            # /api/crosstalk-isolation 才使用）
+            "isolation": {
+                "groups": ["主唱", "对讲"],
+                "forbiddenPairs": [["主唱", "对讲"]],
+            },
+        },
+    },
 }

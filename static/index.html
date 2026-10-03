@@ -51,6 +51,7 @@
       <option value="layout">走线排版演示（多分区）</option>
       <option value="rewire">无中断改线演练演示</option>
       <option value="audit">命名审计演示（互斥名/别名环/无标签/串线）</option>
+      <option value="isolation">串音隔离演示（贪心失败→回溯）</option>
     </select>
     <button class="primary" onclick="compute()">计算路由方案</button>
   </section>
@@ -169,6 +170,47 @@
       <span id="rewire-hint" class="hint"></span>
     </div>
     <div id="rewire-results"></div>
+  </section>
+
+  <section class="card" id="isolation-card" hidden>
+    <h2>8. 串音隔离规划</h2>
+    <p class="hint">为每条路由填写<b>隔离组</b>（同名组允许共线，留空表示不参与隔离），
+      并声明<b>不得互相连通的组对</b>。系统按<b>全常态 / 半常态 / 直通</b>语义对全部路由重新规划：
+      禁配组不能共享<b>设备内部连接</b>、<b>生效常态</b>或<b>前面板跳线</b>形成的物理连通分量
+      （半常态上插孔插线的并送汇合同样禁止）；在保证隔离的前提下<b>尽量少用跳线</b>。
+      先按输入顺序贪心评估，不满足时会<b>回溯重排已规划路由</b>并尝试多用跳线的替代路径；
+      无解时返回<b>冲突组对、最短共享证据与未满足路由</b>，<b>不提交部分方案</b>；
+      规划完成后仍保留<b>反馈环路检测</b>。</p>
+
+    <h3>每条路由的隔离组</h3>
+    <table class="grid">
+      <thead><tr><th>#</th><th>路由</th><th>隔离组（留空＝不分组）</th></tr></thead>
+      <tbody id="isolation-group-rows"></tbody>
+    </table>
+
+    <div class="rewire-cols" style="margin-top:14px">
+      <div class="rewire-col">
+        <h3>禁配组对（不得互相连通）</h3>
+        <div class="forbid-controls">
+          <select id="isolation-forbid-a"></select>
+          <span class="hint">✕</span>
+          <select id="isolation-forbid-b"></select>
+          <button onclick="addForbiddenPair()">+ 添加禁配组对</button>
+        </div>
+        <div id="isolation-forbid-list" class="forbid-list"></div>
+        <p class="hint" style="margin-top:8px">添加组名后此处可选择；同一组与其自身不能禁配。</p>
+      </div>
+      <div class="rewire-col">
+        <h3>隔离组概览</h3>
+        <div id="isolation-group-overview" class="forbid-list"></div>
+      </div>
+    </div>
+
+    <div class="drill-controls" style="margin-top:14px">
+      <button class="primary" onclick="runIsolation()">🛡 计算串音隔离规划</button>
+      <span id="isolation-hint" class="hint"></span>
+    </div>
+    <div id="isolation-results"></div>
   </section>
 </main>
 

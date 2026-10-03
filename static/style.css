@@ -211,3 +211,32 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px
 .micro-op-head .micro-chip { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
 .micro-op h5 { color: var(--muted); font-size: 12px; font-weight: 500; margin: 8px 0 2px; }
 .micro-op svg { max-width: 100%; height: auto; }
+
+/* ---------------- 串音隔离规划 ---------------- */
+.group-input-wrap { display: flex; align-items: center; gap: 8px; }
+.group-dot {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+  border: 1.5px solid var(--border); flex: 0 0 auto;
+}
+.group-input-wrap input { flex: 1 1 auto; }
+.group-tag {
+  display: inline-block; font-size: 12px; font-weight: 600;
+  padding: 2px 10px; border-radius: 10px; color: #0b1521;
+  background: var(--gc, var(--muted)); white-space: nowrap;
+}
+.forbid-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.forbid-controls select { width: auto; flex: 1 1 160px; min-width: 120px; }
+.forbid-controls button { white-space: nowrap; }
+.forbid-list { display: flex; flex-direction: column; gap: 6px; }
+.forbid-chip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #12151a; border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; font-size: 13px;
+}
+.forbid-chip button { margin-left: auto; }
+.group-overview-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 5px 2px; font-size: 13px; border-bottom: 1px dashed var(--border);
+}
+.group-overview-row:last-child { border-bottom: none; }
+#isolation-results { margin-top: 16px; }
