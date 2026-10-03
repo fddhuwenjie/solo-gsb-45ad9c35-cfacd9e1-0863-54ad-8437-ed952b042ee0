@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>录音棚跳线盘路由规划器</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>🎛 录音棚跳线盘路由规划器</h1>
+  <p class="subtitle">配置背板连接与常态模式，指定路由，自动计算最少跳线方案</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1. 设备与端口</h2>
+    <table class="grid">
+      <thead><tr><th>设备名</th><th>输入端口（逗号分隔）</th><th>输出端口（逗号分隔）</th><th></th></tr></thead>
+      <tbody id="device-rows"></tbody>
+    </table>
+    <button class="add" onclick="addDevice()">+ 添加设备</button>
+  </section>
+
+  <section class="card">
+    <h2>2. 跳线盘插孔对与背板连接</h2>
+    <p class="hint">每对含上插孔（T，接设备输出）与下插孔（B，接设备输入）。模式：
+      <b>全常态</b>（任一侧插入即断开）、<b>半常态</b>（仅下插孔插入断开，上插孔插入信号并送）、<b>直通</b>（无常态）。</p>
+    <table class="grid">
+      <thead><tr><th>编号</th><th>上插孔 ← 输出端口</th><th>下插孔 ← 输入端口</th><th>常态模式</th><th></th></tr></thead>
+      <tbody id="pair-rows"></tbody>
+    </table>
+    <button class="add" onclick="addPair()">+ 添加插孔对</button>
+  </section>
+
+  <section class="card">
+    <h2>3. 路由请求</h2>
+    <table class="grid">
+      <thead><tr><th>#</th><th>信号源（输出端口）</th><th>目标（输入端口）</th><th></th></tr></thead>
+      <tbody id="route-rows"></tbody>
+    </table>
+    <button class="add" onclick="addRoute()">+ 添加路由</button>
+  </section>
+
+  <section class="controls">
+    <select id="example-select">
+      <option value="">载入示例…</option>
+      <option value="standard">标准录音链（可解）</option>
+      <option value="conflict">冲突演示（无解）</option>
+      <option value="feedback">反馈环路演示</option>
+      <option value="layout">走线排版演示（多分区）</option>
+      <option value="rewire">无中断改线演练演示</option>
+      <option value="audit">命名审计演示（互斥名/别名环/无标签/串线）</option>
+    </select>
+    <button class="primary" onclick="compute()">计算路由方案</button>
+  </section>
+
+  <section id="results"></section>
+
+  <section class="card" id="drill-card" hidden>
+    <h2>4. 单点故障评估（断路演练）</h2>
+    <p class="hint">先按当前配置完成规划，再选择一条<b>已安装跳线</b>或一条<b>生效中的常态连接</b>模拟断路。
+      后端保持其他占用状态不变，重新评估全部路由：受影响路由、失效原因、断点端口与仍可用的替代路径如下；
+      候选清单按受影响路由数量降序排列。</p>
+    <div class="drill-controls">
+      <select id="fault-select"></select>
+      <button class="primary" onclick="runDrill()">🔌 断路演练</button>
+      <span id="drill-hint" class="hint"></span>
+    </div>
+    <div id="drill-results"></div>
+  </section>
+
+  <section class="card" id="layout-card" hidden>
+    <h2>5. 前面板走线排版</h2>
+    <p class="hint">为面板分区指定<b>可用走线槽层</b>与<b>固定插孔列位</b>（按从左到右顺序填写插孔对编号）。
+      系统保持信号拓扑、常态模式与跳线端点不变，为每根跳线分配<b>走线层</b>与<b>左右绕行方向</b>，
+      按「<b>交叉数最少 → 跨区线数最少 → 同层长度最短</b>」求解，输出每根跳线的层/方向/交叉对与无法避免的冲突。
+      槽层可写 <code>1, 2</code> 或带容量的 <code>1:6, 2:4</code>（每层每分区容量默认 8）。</p>
+    <table class="grid">
+      <thead><tr><th>分区名</th><th>插孔列位（对编号，逗号分隔，左→右）</th><th>可用走线槽层</th><th></th></tr></thead>
+      <tbody id="zone-rows"></tbody>
+    </table>
+    <button class="add" onclick="addZone()">+ 添加分区</button>
+    <div class="drill-controls" style="margin-top:14px">
+      <button class="primary" onclick="runLayout()">🧵 计算走线排版</button>
+      <span id="layout-hint" class="hint"></span>
+    </div>
+    <div id="layout-results"></div>
+  </section>
+
+  <section class="card" id="audit-card" hidden>
+    <h2>6. 信号命名一致性审计</h2>
+    <p class="hint">为<b>设备端口 / 插孔对 / 已规划跳线 / 路由</b>填写规范信号名与别名（别名选填）。
+      系统沿<b>设备内部 · 生效常态 · 跳线</b>传播名签，按<b>半常态分流语义</b>归并端点，检测同一连通分量的
+      <b>互斥名称</b>、<b>别名环</b>、<b>无标签断点</b>与<b>跨路由串线</b>，给出每项问题的<b>最短证据路径</b>
+      与可采纳的规范名。其中<b>跨路由串线只追溯独立信号源与路由归属、与名签无关</b>：改名不能消警，
+      只能调整路由规划或断开物理连通。审计<b>只读取规划结果，不修改任何路由 / 常态 / 跳线</b>。</p>
+
+    <div class="audit-tabs">
+      <button class="audit-tab active" data-tab="ports" onclick="switchAuditTab('ports')">设备端口名签</button>
+      <button class="audit-tab" data-tab="pairs" onclick="switchAuditTab('pairs')">插孔对名签</button>
+      <button class="audit-tab" data-tab="cables" onclick="switchAuditTab('cables')">跳线名签</button>
+      <button class="audit-tab" data-tab="routes" onclick="switchAuditTab('routes')">路由名签</button>
+    </div>
+
+    <div class="audit-tabpane" data-pane="ports">
+      <table class="grid">
+        <thead><tr><th style="width:200px">设备端口</th><th>规范信号名</th><th>别名（选填）</th></tr></thead>
+        <tbody id="audit-port-rows"></tbody>
+      </table>
+    </div>
+    <div class="audit-tabpane" data-pane="pairs" hidden>
+      <table class="grid">
+        <thead><tr><th style="width:260px">插孔对</th><th>规范信号名</th><th>别名（选填）</th></tr></thead>
+        <tbody id="audit-pair-rows"></tbody>
+      </table>
+    </div>
+    <div class="audit-tabpane" data-pane="cables" hidden>
+      <table class="grid">
+        <thead><tr><th style="width:280px">已安装跳线</th><th>规范信号名</th><th>别名（选填）</th></tr></thead>
+        <tbody id="audit-cable-rows"></tbody>
+      </table>
+    </div>
+    <div class="audit-tabpane" data-pane="routes" hidden>
+      <table class="grid">
+        <thead><tr><th>#</th><th>路由</th><th>规范信号名</th><th>别名（选填）</th></tr></thead>
+        <tbody id="audit-route-rows"></tbody>
+      </table>
+    </div>
+
+    <div class="drill-controls" style="margin-top:14px">
+      <button class="primary" onclick="runAudit()">🔎 运行命名审计</button>
+      <button onclick="clearAuditLabels()">清空名签</button>
+      <span id="audit-hint" class="hint"></span>
+    </div>
+    <div id="audit-results"></div>
+  </section>
+
+  <section class="card" id="rewire-card" hidden>
+    <h2>7. 无中断改线演练</h2>
+    <p class="hint">提交<b>当前配置</b>（先按它重建已安装跳线）、<b>目标路由列表</b>与<b>必须始终保持通声的
+      当前路由序号</b>。系统依据全常态 / 半常态 / 插孔占用规则，生成从现状到目标的逐步
+      <b>拆线 · 换接 · 补线</b>方案：每步标明插孔变更、受影响路由与保护路由是否仍可用，
+      优先复用兼容跳线、拆装次数最少；必须使用<b>临时跳线</b>时单独列出。
+      若不存在保持保护路由连续通声的顺序，返回结构化冲突与阻塞原因；目标配置非法不会产生半成品方案。</p>
+
+    <div class="rewire-cols">
+      <div class="rewire-col">
+        <h3>目标路由列表</h3>
+        <table class="grid">
+          <thead><tr><th>#</th><th>信号源</th><th>目标</th><th></th></tr></thead>
+          <tbody id="rewire-target-rows"></tbody>
+        </table>
+        <button class="add" onclick="addRewireRoute()">+ 添加目标路由</button>
+        <div class="drill-controls" style="margin-top:8px">
+          <button onclick="syncRewireTarget()">↺ 同步为当前路由</button>
+        </div>
+      </div>
+      <div class="rewire-col">
+        <h3>必须始终保持通声的当前路由</h3>
+        <div id="rewire-protect-list" class="protect-list"></div>
+        <p class="hint" style="margin-top:8px">勾选的路由在<b>每一步完成后</b>都必须仍有完整信号通路；
+          它们也必须原样出现在目标路由列表中。</p>
+      </div>
+    </div>
+
+    <div class="drill-controls" style="margin-top:14px">
+      <button class="primary" onclick="runRewire()">🧭 生成无中断改线方案</button>
+      <span id="rewire-hint" class="hint"></span>
+    </div>
+    <div id="rewire-results"></div>
+  </section>
+</main>
+
+<footer>跳线盘路由规划器 · Flask + 原生前端</footer>
+<script src="app.js"></script>
+</body>
+</html>
