@@ -904,4 +904,59 @@ EXAMPLES = {
             },
         },
     },
+    "isolation": {
+        "label": "串音隔离演示（贪心冲突，回溯重排成功）",
+        "config": {
+            "devices": [
+                {"name": "SRC", "inputs": [], "outputs": ["a", "b"]},
+                {"name": "SW", "inputs": ["in1", "in2"], "outputs": ["out1", "out2"]},
+                {"name": "M1", "inputs": ["in"], "outputs": []},
+                {"name": "M2", "inputs": ["in"], "outputs": []},
+            ],
+            "pairs": [
+                {"id": 1, "top": "SRC.a", "bottom": "SW.in1", "mode": "full"},
+                {"id": 2, "top": "SRC.b", "bottom": "SW.in2", "mode": "half"},
+                {"id": 3, "top": "SW.out1", "bottom": "M1.in", "mode": "full"},
+                {"id": 4, "top": "SW.out2", "bottom": "M2.in", "mode": "through"},
+            ],
+            "routes": [
+                # 路由 1（A 组）贪心走 0 跳线常态链穿过 SW；
+                # 路由 2（B 组）的 0/1 跳线链路因此必然与 SW 合并 → 冲突。
+                # 回溯重排：路由 1 改用跳线 1T→3B 断开两侧常态，
+                # 路由 2 用 2T→4B，两组彻底分开，共 2 条跳线。
+                {"source": "SRC.a", "target": "M1.in", "isolationGroup": "A"},
+                {"source": "SRC.b", "target": "M2.in", "isolationGroup": "B"},
+            ],
+            "isolation": {
+                "forbiddenPairs": [["A", "B"]],
+            },
+        },
+    },
+    "isolation-conflict": {
+        "label": "串音隔离演示（强制共设备，无解证据）",
+        "config": {
+            "devices": [
+                {"name": "S1", "inputs": [], "outputs": ["out"]},
+                {"name": "S2", "inputs": [], "outputs": ["out"]},
+                {"name": "MIX", "inputs": ["in1", "in2"], "outputs": ["out"]},
+                {"name": "DST", "inputs": ["in"], "outputs": []},
+            ],
+            "pairs": [
+                {"id": 1, "top": "S1.out", "bottom": "MIX.in1", "mode": "full"},
+                {"id": 2, "top": "S2.out", "bottom": "MIX.in2", "mode": "full"},
+                {"id": 3, "top": "MIX.out", "bottom": "DST.in", "mode": "full"},
+            ],
+            "routes": [
+                # 两台信号源都要送到同一个 DST；跳线盘没有任何旁路插孔，
+                # 两条链路无论如何规划都在 MIX 设备内部连通 → 禁配组 A/B
+                # 永远共享物理连通分量。返回冲突组与 1 跳最短共享证据，
+                # 不提交任何方案。
+                {"source": "S1.out", "target": "DST.in", "isolationGroup": "A"},
+                {"source": "S2.out", "target": "DST.in", "isolationGroup": "B"},
+            ],
+            "isolation": {
+                "forbiddenPairs": [["A", "B"]],
+            },
+        },
+    },
 }

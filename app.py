@@ -3,6 +3,7 @@
 from flask import Flask, jsonify, request, send_from_directory
 
 from audit import audit_signals
+from isolation import IsolationError, plan_isolation
 from layout import solve_layout
 from rewire import RewireError, SeamlessConflict, seamless_rewire
 from solver import (EXAMPLES, ConfigError, FaultTargetError,
@@ -44,6 +45,28 @@ def plan():
                                                "message": "请求体必须是 JSON 配置对象"}}), 400
     try:
         result = solve(config)
+    except ConfigError as exc:
+        return _structured_error(exc, 400)
+    return jsonify(result)
+
+
+@app.post("/api/isolation-plan")
+def isolation_plan():
+    """串音隔离规划：为路由声明隔离组与禁配组对，回溯重排全部路由。
+
+    无解 / 搜索未证毕时不提交方案：完整诊断（冲突组、最短共享证据、
+    未满足路由）挂在 409 响应体（assessment 与顶层字段双份暴露）。
+    """
+    config = request.get_json(force=True, silent=True)
+    if not isinstance(config, dict):
+        return jsonify({"ok": False, "error": {"code": "BAD_REQUEST",
+                                               "message": "请求体必须是 JSON 配置对象"}}), 400
+    try:
+        result = plan_isolation(config)
+    except IsolationError as exc:
+        # ISOLATION_INVALID → 400；UNSAT / INCONCLUSIVE → 409（携带完整诊断）
+        status = 400 if exc.code == "ISOLATION_INVALID" else 409
+        return _structured_error(exc, status)
     except ConfigError as exc:
         return _structured_error(exc, 400)
     return jsonify(result)

@@ -36,10 +36,12 @@
   <section class="card">
     <h2>3. 路由请求</h2>
     <table class="grid">
-      <thead><tr><th>#</th><th>信号源（输出端口）</th><th>目标（输入端口）</th><th></th></tr></thead>
+      <thead><tr><th>#</th><th>信号源（输出端口）</th><th>目标（输入端口）</th><th>隔离组（选填）</th><th></th></tr></thead>
       <tbody id="route-rows"></tbody>
     </table>
     <button class="add" onclick="addRoute()">+ 添加路由</button>
+    <p class="hint" style="margin-top:8px">隔离组名用于下方「8. 串音隔离规划」；留空表示该路由不参与隔离（中性路由）。
+      普通「计算路由方案」会忽略此列。</p>
   </section>
 
   <section class="controls">
@@ -51,6 +53,8 @@
       <option value="layout">走线排版演示（多分区）</option>
       <option value="rewire">无中断改线演练演示</option>
       <option value="audit">命名审计演示（互斥名/别名环/无标签/串线）</option>
+      <option value="isolation">串音隔离演示（回溯重排成功）</option>
+      <option value="isolation-conflict">串音隔离演示（无解冲突证据）</option>
     </select>
     <button class="primary" onclick="compute()">计算路由方案</button>
   </section>
@@ -169,6 +173,31 @@
       <span id="rewire-hint" class="hint"></span>
     </div>
     <div id="rewire-results"></div>
+  </section>
+
+  <section class="card" id="isolation-card" hidden>
+    <h2>8. 串音隔离规划</h2>
+    <p class="hint">为每条路由在上方表格填写<b>隔离组</b>（留空为中性路由），并在此声明<b>不得互相连通的组对</b>。
+      系统按<b>全常态 / 半常态 / 直通</b>语义重新规划<b>全部</b>路由：禁配组不能共享
+      <b>设备内部连接</b>、<b>生效常态</b>或<b>前面板跳线</b>形成的任何物理连通分量
+      （半常态上插孔插线信号并送仍算同一分量）。先试按输入顺序的贪心方案，不满足隔离时
+      <b>回溯重排已规划路由</b>（含为冲突路由改走非最短备选路径），在跳线尽量少的前提下求可行方案，
+      并保留<b>反馈环检测</b>。搜索证毕无解或枚举超限时<b>不提交半成品</b>，只返回冲突组、
+      每组的<b>最短共享证据</b>与未满足路由。</p>
+
+    <h3 style="font-size:14px;color:var(--accent);margin:4px 0 8px">禁配组对（两组信号不得落入同一物理连通分量）</h3>
+    <table class="grid">
+      <thead><tr><th style="width:44%">隔离组 A</th><th style="width:44%">隔离组 B</th><th></th></tr></thead>
+      <tbody id="forbidden-rows"></tbody>
+    </table>
+    <button class="add" onclick="addForbiddenPair()">+ 添加禁配组对</button>
+
+    <div class="drill-controls" style="margin-top:14px">
+      <button class="primary" onclick="runIsolation()">🛡 按隔离约束重新规划</button>
+      <button onclick="syncIsolationGroups()">↺ 同步路由表中的隔离组</button>
+      <span id="isolation-hint" class="hint"></span>
+    </div>
+    <div id="isolation-results"></div>
   </section>
 </main>
 

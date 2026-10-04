@@ -82,12 +82,15 @@ function renderRoutes() {
       <td>${i + 1}</td>
       <td><select onchange="state.routes[${i}].source = this.value">${portOptions("out", r.source)}</select></td>
       <td><select onchange="state.routes[${i}].target = this.value">${portOptions("in", r.target)}</select></td>
+      <td><input class="route-group-input" placeholder="如 A / VOCAL"
+           value="${esc(r.isolationGroup || "")}"
+           oninput="state.routes[${i}].isolationGroup = this.value"></td>
       <td><button class="danger" onclick="state.routes.splice(${i},1);renderRoutes()">删除</button></td>
     </tr>`).join("");
 }
 
 function addRoute() {
-  state.routes.push({ source: "", target: "" });
+  state.routes.push({ source: "", target: "", isolationGroup: "" });
   renderRoutes();
 }
 
@@ -102,7 +105,10 @@ async function loadExample(name) {
   if (!cfg) return;
   state.devices = cfg.devices.map((d) => ({ ...d }));
   state.pairs = cfg.pairs.map((p) => ({ ...p }));
-  state.routes = cfg.routes.map((r) => ({ ...r }));
+  state.routes = cfg.routes.map((r) => ({
+    ...r,
+    isolationGroup: r.isolationGroup || "",
+  }));
   // 示例可自带走线排版分区配置；否则清空，等规划完成后预填默认单分区
   state.zones = (cfg.layout && Array.isArray(cfg.layout.zones))
     ? cfg.layout.zones.map((z) => ({
@@ -115,6 +121,11 @@ async function loadExample(name) {
     : [];
   // 示例可自带信号名签（审计模块使用）
   loadAuditLabelsFromExample(cfg.labels);
+  // 示例可自带串音隔离声明（禁配组对）
+  isolationState.forbidden = (cfg.isolation && Array.isArray(cfg.isolation.forbiddenPairs))
+    ? cfg.isolation.forbiddenPairs.map(normalizeForbiddenPair).filter(Boolean)
+    : [];
+  renderForbiddenRows();
   renderAll();
   renderZones();
   $("#results").innerHTML = "";
@@ -126,6 +137,9 @@ async function loadExample(name) {
   $("#audit-results").innerHTML = "";
   $("#rewire-card").hidden = true;
   $("#rewire-results").innerHTML = "";
+  $("#isolation-card").hidden = true;
+  $("#isolation-results").innerHTML = "";
+  lastIsolationData = null;
   rewireState.targetRoutes = [];
   rewireState.protected = new Set();
   lastRewireData = null;
@@ -141,7 +155,13 @@ async function compute() {
     pairs: state.pairs.map((p) => ({
       id: Number(p.id), top: p.top || null, bottom: p.bottom || null, mode: p.mode,
     })),
-    routes: state.routes,
+    routes: state.routes.map((r) => ({
+      source: r.source,
+      target: r.target,
+      ...(r.isolationGroup ? { isolationGroup: r.isolationGroup.trim() } : {}),
+    })),
+    ...(isolationState.forbidden.length
+      ? { isolation: { forbiddenPairs: collectForbiddenPairs() } } : {}),
   };
   lastConfig = body;
   let data, ok;
@@ -162,6 +182,7 @@ async function compute() {
   renderLayoutPanel(data, ok);
   renderAuditPanel(data, ok);
   renderRewirePanel(data, ok);
+  renderIsolationPanel(data, ok);
   $("#results").scrollIntoView({ behavior: "smooth" });
 }
 
@@ -1627,6 +1648,357 @@ function rewireSnapshotSvg(snap) {
     s += `<text x="${pos[p.topJack].x}" y="${botY + 40}" fill="#9aa4b2" font-size="10" text-anchor="middle">第${p.id}对</text>`;
   }
   s += `<text x="20" y="${height - 12}" fill="#ffcf5c" font-size="11">黄色虚线＝临时跳线 · 空心线头＝悬空插头（插/拔中间瞬间）</text>`;
+  s += `</svg>`;
+  return s;
+}
+
+/* ---------------- 串音隔离规划 ---------------- */
+
+const isolationState = { forbidden: [] };
+let lastIsolationData = null;
+
+const GROUP_COLORS = ["#4da3ff", "#ff9f43", "#c56cf0", "#3ecf8e",
+  "#ff6b6b", "#ffcf5c", "#5ac8fa", "#ff8fd0", "#9be15d", "#ffb86b"];
+
+function groupColor(g, groupOrder) {
+  const i = Math.max(0, groupOrder.indexOf(g));
+  return GROUP_COLORS[i % GROUP_COLORS.length];
+}
+
+function normalizeForbiddenPair(fp) {
+  if (Array.isArray(fp) && fp.length === 2) return { a: String(fp[0] || ""), b: String(fp[1] || "") };
+  if (fp && typeof fp === "object") {
+    const a = fp.a ?? fp.groupA ?? (Array.isArray(fp.groups) ? fp.groups[0] : "");
+    const b = fp.b ?? fp.groupB ?? (Array.isArray(fp.groups) ? fp.groups[1] : "");
+    return { a: String(a || ""), b: String(b || "") };
+  }
+  return null;
+}
+
+function renderForbiddenRows() {
+  const groups = [...new Set(state.routes.map((r) => (r.isolationGroup || "").trim())
+    .filter(Boolean))].sort();
+  const opts = (sel) => `<option value="">选择隔离组…</option>` +
+    groups.map((g) => `<option value="${esc(g)}" ${g === sel ? "selected" : ""}>${esc(g)}</option>`).join("");
+  $("#forbidden-rows").innerHTML = isolationState.forbidden.length
+    ? isolationState.forbidden.map((fp, i) => `
+      <tr>
+        <td><select onchange="isolationState.forbidden[${i}].a = this.value">${opts(fp.a)}</select></td>
+        <td><select onchange="isolationState.forbidden[${i}].b = this.value">${opts(fp.b)}</select></td>
+        <td><button class="danger" onclick="isolationState.forbidden.splice(${i},1);renderForbiddenRows()">删除</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="3" class="hint">尚未声明禁配组对。先在上方路由表为路由填写隔离组，再点「+ 添加禁配组对」。</td></tr>`;
+}
+
+function addForbiddenPair() {
+  isolationState.forbidden.push({ a: "", b: "" });
+  renderForbiddenRows();
+}
+
+function collectForbiddenPairs() {
+  return isolationState.forbidden
+    .filter((fp) => fp.a && fp.b && fp.a !== fp.b)
+    .map((fp) => [fp.a, fp.b]);
+}
+
+function syncIsolationGroups() {
+  renderForbiddenRows();
+  $("#isolation-hint").textContent = "已同步路由表中的隔离组选项。";
+}
+
+function renderIsolationPanel(data, httpOk) {
+  const card = $("#isolation-card");
+  if (!httpOk || !data || data.error || !Array.isArray(data.pairs)) {
+    card.hidden = true;
+    return;
+  }
+  renderForbiddenRows();
+  card.hidden = false;
+  const groupCount = new Set(state.routes.map((r) => (r.isolationGroup || "").trim())
+    .filter(Boolean)).size;
+  $("#isolation-hint").textContent = groupCount
+    ? `当前路由表共 ${groupCount} 个隔离组；声明禁配组对后按隔离约束重新规划。`
+    : "路由表尚未填写隔离组。";
+}
+
+async function runIsolation() {
+  const out = $("#isolation-results");
+  if (!lastConfig) {
+    out.innerHTML = `<div class="banner warn">请先计算一次路由方案。</div>`;
+    return;
+  }
+  const groups = state.routes.map((r) => (r.isolationGroup || "").trim());
+  const badSelf = isolationState.forbidden.find((fp) => fp.a && fp.a === fp.b);
+  if (badSelf) {
+    out.innerHTML = `<div class="banner err">禁配组对不能是同一个组：${esc(badSelf.a)}</div>`;
+    return;
+  }
+  const unknown = isolationState.forbidden
+    .flatMap((fp) => [fp.a, fp.b])
+    .find((g) => g && !groups.includes(g));
+  if (unknown) {
+    out.innerHTML = `<div class="banner err">隔离组 “${esc(unknown)}” 尚未分配给任何路由，请先在路由表填写。</div>`;
+    return;
+  }
+  const body = {
+    ...lastConfig,
+    routes: state.routes.map((r, i) => ({
+      source: r.source,
+      target: r.target,
+      ...(groups[i] ? { isolationGroup: groups[i] } : {}),
+    })),
+    isolation: { forbiddenPairs: collectForbiddenPairs() },
+  };
+  out.innerHTML = `<div class="banner">⏳ 正在按全常态 / 半常态 / 直通语义重新规划全部路由（贪心 → 回溯重排）…</div>`;
+  let data, status;
+  try {
+    const res = await fetch("/api/isolation-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    data = await res.json();
+    status = res.status;
+  } catch (e) {
+    out.innerHTML = `<div class="banner err">无法连接后端：${esc(e.message)}</div>`;
+    return;
+  }
+  if (status === 400) {
+    out.innerHTML = `<div class="banner err">隔离配置错误：${esc(errorMessage(data))}</div>`;
+    return;
+  }
+  // 409：ISOLATION_UNSAT（证毕无解）/ ISOLATION_INCONCLUSIVE（搜索超限）；
+  // 完整诊断在 assessment（顶层也双份暴露），均不提交方案。
+  const a = data.assessment || data;
+  lastIsolationData = a;
+  renderIsolationResult(a, status === 200, data.error);
+}
+
+function renderIsolationResult(a, solved, error) {
+  let html = "";
+  if (solved) {
+    const re = a.search && a.search.reordered;
+    html += `<div class="banner ok">✅ 串音隔离规划成功：${a.forbiddenPairs.length} 对禁配组全部物理隔离，
+      共安装 <b>${a.cableCount}</b> 条跳线。${re ? "输入顺序贪心方案不满足隔离，已<b>回溯重排</b>路由规划顺序。"
+        : "输入顺序贪心方案即满足隔离。"}</div>`;
+  } else if (error.code === "ISOLATION_INCONCLUSIVE") {
+    html += `<div class="banner warn">⚠️ ${esc(error.message || "搜索超过节点上限，未能证明无解")}：
+      系统<b>未提交任何方案</b>。下方给出输入顺序贪心方案的隔离诊断供参考。</div>`;
+  } else {
+    html += `<div class="banner err">❌ ${esc(error.message || "串音隔离无可行方案")}：
+      系统<b>未提交任何（部分）方案</b>，下方给出冲突组、最短共享证据与未满足路由。</div>`;
+  }
+
+  const sch = a.search || {};
+  html += `<div class="audit-stat-row">
+    <span class="audit-stat"><b>${(a.groups || []).length}</b>隔离组</span>
+    <span class="audit-stat"><b>${(a.forbiddenPairs || []).length}</b>禁配组对</span>
+    <span class="audit-stat ${a.violations && a.violations.length ? "err" : "ok"}">
+      <b>${(a.violations || []).length}</b>共享分量冲突</span>
+    <span class="audit-stat ${a.unsatisfiedRoutes && a.unsatisfiedRoutes.length ? "err" : "ok"}">
+      <b>${(a.unsatisfiedRoutes || []).length}</b>未满足路由</span>
+    <span class="audit-stat"><b>${sch.nodes || 0}</b>搜索节点</span>
+    <span class="audit-stat"><b>${sch.backtracks || 0}</b>回溯次数</span>
+    <span class="audit-stat"><b>${a.cableCount}</b>${solved ? "跳线（已提交）" : "贪心基线跳线（未提交）"}</span>
+  </div>`;
+
+  if (a.feedbackLoops && a.feedbackLoops.length) {
+    html += `<div class="banner warn">⚠️ ${solved ? "方案" : "贪心基线"}中检测到 ${a.feedbackLoops.length} 个反馈环路：<ul class="loop-list">` +
+      a.feedbackLoops.map((l) => `<li>${l.map(esc).join(" → ")}</li>`).join("") + `</ul></div>`;
+  }
+
+  // 隔离组拓扑（组、禁配关系、按组着色的物理分量）
+  html += `<div class="result-card"><h3>隔离组拓扑（物理连通分量按隔离组着色）</h3>
+    <div class="audit-svg-wrap">${isolationTopologySvg(a)}</div>
+    <div class="legend">
+      ${(a.groups || []).map((g, i) => `<span class="swatch" style="background:${GROUP_COLORS[i % GROUP_COLORS.length]}"></span>${esc(g.id)}（路由 ${g.routes.map((r) => r + 1).join("、") || "—"}）`).join("　")}
+      <br>同一底色＝同一物理连通分量；<span class="swatch" style="background:rgba(255,107,107,.35);border-color:#ff6b6b"></span>冲突分量（禁配组共享）
+      <span class="swatch" style="background:rgba(255,207,92,.35);border-color:#ffcf5c"></span>最短共享证据（粗亮线）
+    </div></div>`;
+
+  // 冲突清单（含最短共享证据）
+  if ((a.violations || []).length) {
+    html += `<div class="result-card"><h3>禁配组共享冲突与最短共享证据</h3>`;
+    for (const v of a.violations) {
+      html += `<div class="issue-card severity-error">
+        <div class="issue-head">
+          <span class="issue-tag" style="background:${groupColor(v.groups[0], groupOrderOf(a))};color:#0b1521">${esc(v.groups[0])}</span>
+          <span>⚔</span>
+          <span class="issue-tag" style="background:${groupColor(v.groups[1], groupOrderOf(a))};color:#0b1521">${esc(v.groups[1])}</span>
+          <span class="hint">物理连通分量 #${v.component + 1} · 最短共享证据 ${v.evidence.filter((x) => x.kind === "edge").length} 跳</span>
+        </div>
+        <div class="issue-msg">隔离组 <b>${esc(v.groups[0])}</b> 与 <b>${esc(v.groups[1])}</b> 的路由在下方物理链路上连通：
+          调整路由顺序或改走跳线均无法断开时即为无解。</div>
+        ${chainHtml(v.evidence)}
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // 未满足路由
+  if ((a.unsatisfiedRoutes || []).length) {
+    html += `<div class="result-card"><h3>未满足路由（无解时不提交方案）</h3>`;
+    for (const u of a.unsatisfiedRoutes) {
+      html += `<div class="route-block">
+        <div class="route-title">路由 ${u.index + 1}：${esc(u.source)} → ${esc(u.target)}
+          ${u.isolationGroup ? `<span class="issue-tag" style="background:${groupColor(u.isolationGroup, groupOrderOf(a))};color:#0b1521">${esc(u.isolationGroup)}</span>` : ""}
+          <span class="tag bad">${u.status === "unroutable" ? "无可用通路" : "隔离未满足"}</span></div>
+        <ul class="conflict-reasons">${(u.reasons || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // 每条路由的链路
+  html += `<div class="result-card"><h3>${solved ? "隔离规划后的每条路由链路（提交顺序见标签）" : "贪心基线路由链路（诊断用，未提交）"}</h3>`;
+  for (const r of a.routes) {
+    const g = r.isolationGroup;
+    const gtag = g
+      ? `<span class="issue-tag" style="background:${groupColor(g, groupOrderOf(a))};color:#0b1521">${esc(g)}</span>`
+      : `<span class="tag warn">中性</span>`;
+    const orderTag = solved && r.commitOrder != null && r.commitOrder !== r.index
+      ? `<span class="tag warn">规划序 ${r.commitOrder + 1}</span>` : "";
+    html += `<div class="route-block"><div class="route-title">路由 ${r.index + 1}：${esc(r.source)} → ${esc(r.target)} ${gtag} ${orderTag}`;
+    if (r.status === "ok") {
+      html += ` <span class="tag ok">${(r.cables || []).length ? `${r.cables.length} 条跳线` : "0 跳线"}</span></div>`;
+      html += chainHtml(r.chain);
+    } else {
+      const c = (a.conflicts || []).find((x) => x.route === r.index);
+      html += ` <span class="tag bad">无解</span></div>`;
+      if (c) html += `<ul class="conflict-reasons">${c.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+    }
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  if (solved && a.steps && a.steps.length) {
+    html += `<div class="result-card"><h3>接线顺序</h3><ol class="steps">` +
+      a.steps.map((sx) => `<li>${esc(sx)}</li>`).join("") + `</ol></div>`;
+  }
+
+  $("#isolation-results").innerHTML = html;
+}
+
+function groupOrderOf(a) {
+  return (a.groups || []).map((g) => g.id);
+}
+
+function isolationTopologySvg(data) {
+  const pairs = data.pairs;
+  if (!pairs.length) return "";
+  const cables = data.cables || [];
+  const colW = 104, x0 = 64, topY = 70, botY = 140, height = 330;
+  const width = x0 * 2 + colW * (pairs.length - 1);
+  const pos = {};
+  pairs.forEach((p, i) => {
+    pos[p.topJack] = { x: x0 + i * colW, y: topY };
+    pos[p.bottomJack] = { x: x0 + i * colW, y: botY };
+  });
+
+  // 端口 → 组集合（来自分量载荷）
+  const groupsOfPort = {};
+  const compOfPort = {};
+  (data.components || []).forEach((comp) => {
+    for (const pp of comp.ports) {
+      groupsOfPort[pp.port] = pp.groups || [];
+      compOfPort[pp.port] = comp.componentId;
+    }
+  });
+  const gOrder = groupOrderOf(data);
+  const portColor = (port) => {
+    const gs = groupsOfPort[port];
+    if (!gs || !gs.length) {
+      // 承载路由但无组的中性端口：深灰
+      return port in groupsOfPort ? "#262d38" : "#12151a";
+    }
+    return groupColor(gs[0], gOrder);
+  };
+
+  // 违例分量与证据边
+  const badComps = new Set((data.violations || []).map((v) => v.component));
+  const evidencePorts = new Set();
+  const evidenceEdges = new Set();
+  for (const v of data.violations || []) {
+    for (let i = 0; i < v.evidence.length; i++) {
+      const it = v.evidence[i];
+      if (it.kind === "port") evidencePorts.add(it.port);
+      if (it.kind === "edge") {
+        const a2 = v.evidence[i - 1], b2 = v.evidence[i + 1];
+        if (a2 && b2 && a2.kind === "port" && b2.kind === "port") {
+          evidenceEdges.add(`${it.type}:${it.cableId || it.pairId || it.device || ""}:${[a2.port, b2.port].sort().join("|")}`);
+        }
+      }
+    }
+  }
+
+  let s = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`;
+  s += `<rect x="8" y="32" width="${width - 16}" height="150" rx="10" fill="#12151a" stroke="#2e3542"/>`;
+  s += `<text x="20" y="24" fill="#9aa4b2" font-size="12">串音隔离拓扑 · 禁配组共享 = 冲突（红描边）</text>`;
+
+  // 常态
+  for (const p of pairs) {
+    if (p.mode === "through" || !p.topPort || !p.bottomPort) continue;
+    const t = pos[p.topJack], b = pos[p.bottomJack];
+    const ekey = `normal:${p.id}:${[p.topPort, p.bottomPort].sort().join("|")}`;
+    const onEv = evidenceEdges.has(ekey);
+    const inBad = badComps.has(compOfPort[p.topPort]) && compOfPort[p.topPort] === compOfPort[p.bottomPort];
+    let col = p.normalActive ? "#3ecf8e" : "#5a6270";
+    if (inBad) col = "#ff6b6b";
+    if (onEv) col = "#ffcf5c";
+    s += `<line x1="${t.x - 18}" y1="${t.y}" x2="${b.x - 18}" y2="${b.y}"
+         stroke="${col}" stroke-width="${onEv ? 6 : 3}" opacity="${p.normalActive ? 0.95 : 0.5}"/>`;
+  }
+
+  // 跳线
+  cables.forEach((c) => {
+    const pa = pos[c.fromJack], pb = pos[c.toJack];
+    const ekey = `cable:${c.id}:${[c.fromPort, c.toPort].sort().join("|")}`;
+    const onEv = evidenceEdges.has(ekey);
+    const inBad = badComps.has(compOfPort[c.fromPort]);
+    const col = onEv ? "#ffcf5c" : inBad ? "#ff6b6b" : CABLE_COLORS[c.id % CABLE_COLORS.length];
+    const depth = 64 + Math.abs(pa.x - pb.x) * 0.3;
+    const mx = (pa.x + pb.x) / 2, my = botY + depth;
+    s += `<path d="M ${pa.x} ${pa.y} Q ${mx} ${my} ${pb.x} ${pb.y}" fill="none"
+         stroke="${col}" stroke-width="${onEv ? 5.5 : 3}"/>`;
+    s += `<text x="${mx}" y="${my * 0.62}" fill="${col}" font-size="12"
+         text-anchor="middle" font-weight:bold">#${c.id}</text>`;
+  });
+
+  // 设备内部证据边（面板上方黄色虚线弧）
+  for (const v of data.violations || []) {
+    const jackPosOfPort = {};
+    for (const p of pairs) {
+      if (p.topPort) jackPosOfPort[p.topPort] = pos[p.topJack];
+      if (p.bottomPort) jackPosOfPort[p.bottomPort] = pos[p.bottomJack];
+    }
+    for (let i = 0; i < v.evidence.length; i++) {
+      const it = v.evidence[i];
+      if (it.kind !== "edge" || it.type !== "device") continue;
+      const a2 = v.evidence[i - 1], b2 = v.evidence[i + 1];
+      if (!a2 || !b2 || a2.kind !== "port" || b2.kind !== "port") continue;
+      const pa = jackPosOfPort[a2.port], pb = jackPosOfPort[b2.port];
+      if (!pa || !pb) continue;
+      s += `<path d="M ${pa.x} ${pa.y - 12} Q ${(pa.x + pb.x) / 2} 36 ${pb.x} ${pb.y - 12}"
+           fill="none" stroke="#ffcf5c" stroke-width="2.5" stroke-dasharray="6,4"/>`;
+      s += `<text x="${(pa.x + pb.x) / 2}" y="44" fill="#ffcf5c" font-size="10"
+           text-anchor="middle">${esc(it.device)} 内部</text>`;
+    }
+  }
+
+  // 插孔
+  for (const p of pairs) {
+    for (const [jack, port, dy] of [[p.topJack, p.topPort, -15], [p.bottomJack, p.bottomPort, 26]]) {
+      const { x, y } = pos[jack];
+      const fill = port ? portColor(port) : "#1d222b";
+      const isEv = port && evidencePorts.has(port);
+      const stroke = isEv ? "#ffcf5c" : "#9aa4b2";
+      s += `<circle cx="${x}" cy="${y}" r="9" fill="${fill}" stroke="${stroke}" stroke-width="${isEv ? 3 : 1.5}"/>`;
+      s += `<text x="${x}" y="${y + dy}" fill="#9aa4b2" font-size="10" text-anchor="middle">${esc(port || "—")}</text>`;
+      s += `<text x="${x + 14}" y="${y + 4}" fill="#e6e9ef" font-size="10">${esc(jack)}</text>`;
+    }
+    s += `<text x="${pos[p.topJack].x}" y="${botY + 42}" fill="#9aa4b2" font-size="10"
+         text-anchor="middle">第${p.id}对 · ${esc(p.modeLabel)}</text>`;
+  }
   s += `</svg>`;
   return s;
 }
